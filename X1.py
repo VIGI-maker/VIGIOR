@@ -1,51 +1,42 @@
+# xR-AI.py
 import streamlit as st
-from PIL import Image, ImageDraw
-import torch
-import torchvision
-import torchvision.transforms as T
+from PIL import Image
+import requests
+from io import BytesIO
 
-st.title("🦴 VIGIOR - Détection automatique de fracture (IA)")
+# --- Récupération sécurisée du token Hugging Face ---
+HF_API_KEY = st.secrets["HUGGINGFACE"]["HF_API_KEY"]
 
-st.write("Upload une radiographie. Les zones suspectes sont encadrées.")
+# --- Titre de l'app ---
+st.title("Détection de fracture - Radiographie")
+st.write("Upload une radiographie pour que l'IA détecte la fracture.")
 
-uploaded_file = st.file_uploader("Choisir une radiographie", type=["jpg","jpeg","png"])
+# --- Upload image ---
+uploaded_file = st.file_uploader("Choisir une radiographie", type=["png","jpg","jpeg","dcm"])
+if uploaded_file:
+    # Afficher l'image uploadée
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Radiographie uploadée", use_column_width=True)
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="Radiographie originale", use_column_width=True)
+    # --- Préparation pour Hugging Face Inference API ---
+    model_id = "mediclinal/Fracture-Detection-YOLOv8"  # modèle pré-entraîné exemple
 
-    # --- Chargement du modèle de détection d’objets ---
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
-    model.eval()
+    # Convertir image en bytes
+    img_byte_arr = BytesIO()
+    image.save(img_byte_arr, format='PNG')
+    img_bytes = img_byte_arr.getvalue()
 
-    transform = T.Compose([
-        T.ToTensor()
-    ])
+    # Appel API Hugging Face
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    response = requests.post(
+        f"https://api-inference.huggingface.co/models/{model_id}",
+        headers=headers,
+        files={"file": img_bytes}
+    )
 
-    img_tensor = transform(image)
-
-    with torch.no_grad():
-        predictions = model([img_tensor])[0]
-
-    boxes = predictions["boxes"]
-    scores = predictions["scores"]
-
-    threshold = 0.5
-
-    draw = ImageDraw.Draw(image)
-
-    detected = 0
-    for box, score in zip(boxes, scores):
-        if score > threshold:
-            x1, y1, x2, y2 = box
-            draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
-            detected +=1
-
-    st.image(image, caption="Zones suspectes", use_column_width=True)
-
-    if detected > 0:
-        st.warning(f"⚠️ {detected} zone(s) suspecte(s) détectée(s)")
+    if response.status_code == 200:
+        result = response.json()
+        st.subheader("Résultat IA :")
+        st.write(result)  # tu peux personnaliser pour afficher les coordonnées du rectangle, etc.
     else:
-        st.success("✅ Aucune zone suspecte détectée.")
-
-    st.info("⚠️ Prototype IA : nécessite entraînement spécifique fractures pour précision clinique.")
+        st.error(f"Erreur API : {response.status_code}")
